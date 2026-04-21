@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = 'knot-rails-assets-pipeline'
-  s.version     = '6.1.7'
+  s.version     = '6.1.8'
   s.summary     = 'Asset pipeline management for Rails applications'
   s.description = 'Provides asset compilation, fingerprinting, and serving for Rails 6+ applications, replacing Sprockets.'
   s.authors     = ['rails-community']

